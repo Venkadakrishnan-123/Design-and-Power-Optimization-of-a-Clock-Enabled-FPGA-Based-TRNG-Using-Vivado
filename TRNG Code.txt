@@ -1,0 +1,60 @@
+TEST BENCH:
+module trng_low_power (
+    input wire clk,       // System clock
+    input wire rst,       // Reset
+    output reg [7:0] random_number // 8-bit random output
+);
+// Internal enable (auto-controlled)
+reg enable;
+reg [15:0] slow_counter;
+// Generate low-frequency enable signal (reduces power)
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        slow_counter <= 0;
+        enable <= 0;
+    end else begin
+        slow_counter <= slow_counter + 1;
+        enable <= (slow_counter == 16'd50000); // rare activation
+    end
+end
+// ================= Ring Oscillator =================
+(* KEEP = "TRUE" *) wire [2:0] ro_chain;
+wire ro_out;
+assign ro_chain[0] = enable ? ~ro_chain[2] : 1'b0;
+assign ro_chain[1] = ~ro_chain[0];
+assign ro_chain[2] = ~ro_chain[1];
+assign ro_out = ro_chain[2];
+// ================= Random Sampling =================
+reg [7:0] shift_reg;
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        shift_reg <= 8'b0;
+        random_number <= 8'b0;
+    end else if (enable) begin
+        // Shift in entropy bit
+        shift_reg <= {shift_reg[6:0], ro_out};
+        random_number <= shift_reg;
+    end
+end
+endmodule
+// ================= TESTBENCH =================
+module trng_low_power_tb;
+reg clk;
+reg rst;
+wire [7:0] random_number;
+trng_low_power uut (
+    .clk(clk),
+    .rst(rst),
+    .random_number(random_number)
+);
+// Slow clock (reduces switching power)
+always #10 clk = ~clk;
+initial begin
+    clk = 0;
+    rst = 1;
+    #50;
+    rst = 0;
+    #5000;
+    $stop;
+end
+endmodule
